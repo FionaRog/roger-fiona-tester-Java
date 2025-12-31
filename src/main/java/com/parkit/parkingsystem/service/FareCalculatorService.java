@@ -3,8 +3,6 @@ package com.parkit.parkingsystem.service;
 import com.parkit.parkingsystem.constants.Fare;
 import com.parkit.parkingsystem.model.Ticket;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 
 public class FareCalculatorService {
 
