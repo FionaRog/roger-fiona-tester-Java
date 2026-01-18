@@ -1,9 +1,12 @@
 package com.parkit.parkingsystem.integration;
 
+import com.parkit.parkingsystem.constants.Fare;
+import com.parkit.parkingsystem.constants.ParkingType;
 import com.parkit.parkingsystem.dao.ParkingSpotDAO;
 import com.parkit.parkingsystem.dao.TicketDAO;
 import com.parkit.parkingsystem.integration.config.DataBaseTestConfig;
 import com.parkit.parkingsystem.integration.service.DataBasePrepareService;
+import com.parkit.parkingsystem.model.Ticket;
 import com.parkit.parkingsystem.service.ParkingService;
 import com.parkit.parkingsystem.util.InputReaderUtil;
 import org.junit.jupiter.api.AfterAll;
@@ -13,6 +16,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
+
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,22 +52,87 @@ public class ParkingDataBaseIT {
 
     @AfterAll
     private static void tearDown(){
-
+    // Nothing to clean up
     }
 
     @Test
-    public void testParkingACar(){
+    public void testParkingACar() throws Exception {
+        int nextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
         ParkingService parkingService = new ParkingService(inputReaderUtil, parkingSpotDAO, ticketDAO);
         parkingService.processIncomingVehicle();
-        //TODO: check that a ticket is actualy saved in DB and Parking table is updated with availability
+
+        Ticket savedTicket = ticketDAO.getTicket("ABCDEF");
+        assertNotNull(savedTicket,"the ticket must exist in database after its entrance");
+        assertNotNull(savedTicket.getParkingSpot(),"the ticket must be associated with a parking spot");
+        int parkingNumber = savedTicket.getParkingSpot().getId();
+        assertTrue(parkingNumber > 0);
+
+        int finalNextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
+        assertTrue(finalNextAvailableParkingSpot > nextAvailableParkingSpot, "the parking spot used by the vehicle should be unavailable");
     }
 
     @Test
-    public void testParkingLotExit(){
+    public void testParkingLotExit() throws Exception {
+        int nextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
         testParkingACar();
         ParkingService parkingService = new ParkingService(inputReaderUtil, parkingSpotDAO, ticketDAO);
+        Ticket savedTicket = ticketDAO.getTicket("ABCDEF");
+        Date dateMinusOneHour = Date.from(
+                LocalDateTime.now()
+                        .minusHours(1)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+        );
+        savedTicket.setInTime(dateMinusOneHour);
+        ticketDAO.updateTicket(savedTicket);
         parkingService.processExitingVehicle();
-        //TODO: check that the fare generated and out time are populated correctly in the database
+        savedTicket = ticketDAO.getTicket("ABCDEF");
+
+
+        assertNotNull(savedTicket.getOutTime(), "out time must be saved into the ticket");
+        assertTrue(savedTicket.getPrice() > 0, "the price must be more than 0 because the parking duration is more than 30 minutes");
+
+        int finalNextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
+        assertEquals(finalNextAvailableParkingSpot , nextAvailableParkingSpot, "the parking spot must be available as before the entrance of the vehicle");
     }
 
-}
+    @Test
+    public void testParkingLotExitRecurringUser() throws Exception {
+        testParkingLotExit();
+
+        ParkingService parkingService = new ParkingService(inputReaderUtil, parkingSpotDAO, ticketDAO);
+
+        parkingService.processIncomingVehicle();
+
+        assertTrue(ticketDAO.getNbTicket("ABCDEF") > 1, "Must be a recurring user with at least 1 ticket already registered");
+
+        Ticket secondTicket = ticketDAO.getTicket("ABCDEF");
+
+        Date inTime = Date.from(
+                LocalDateTime.now()
+                        .minusHours(1)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+        );
+        Date outTime = new Date();
+
+        secondTicket.setInTime(inTime);
+        secondTicket.setOutTime(outTime);
+        ticketDAO.updateTicket(secondTicket);
+
+        parkingService.processExitingVehicle();
+
+
+        Ticket savedTicket = ticketDAO.getTicket("ABCDEF");
+
+        long durationInMillis = outTime.getTime() - inTime.getTime();
+        double duration = durationInMillis / (1000.0 * 60 * 60);
+        duration = Math.round(duration * 100.0) / 100.0;
+
+        double expectedDiscountedPrice = duration * Fare.CAR_RATE_PER_HOUR * 0.95;
+        assertEquals(expectedDiscountedPrice, savedTicket.getPrice(), 0.01,"The price must include a 5% discount for recurring user");
+    }
+
+
+    }
+
