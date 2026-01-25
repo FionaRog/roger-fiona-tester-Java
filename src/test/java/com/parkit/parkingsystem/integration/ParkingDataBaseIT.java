@@ -1,6 +1,5 @@
 package com.parkit.parkingsystem.integration;
 
-import com.parkit.parkingsystem.constants.Fare;
 import com.parkit.parkingsystem.constants.ParkingType;
 import com.parkit.parkingsystem.dao.ParkingSpotDAO;
 import com.parkit.parkingsystem.dao.TicketDAO;
@@ -59,11 +58,13 @@ public class ParkingDataBaseIT {
     public void testParkingACar() throws Exception {
         int nextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
         ParkingService parkingService = new ParkingService(inputReaderUtil, parkingSpotDAO, ticketDAO);
-        parkingService.processIncomingVehicle();
 
+        parkingService.processIncomingVehicle();
         Ticket savedTicket = ticketDAO.getTicket("ABCDEF");
+
         assertNotNull(savedTicket,"the ticket must exist in database after its entrance");
         assertNotNull(savedTicket.getParkingSpot(),"the ticket must be associated with a parking spot");
+
         int parkingNumber = savedTicket.getParkingSpot().getId();
         assertTrue(parkingNumber > 0);
 
@@ -77,6 +78,22 @@ public class ParkingDataBaseIT {
         testParkingACar();
         ParkingService parkingService = new ParkingService(inputReaderUtil, parkingSpotDAO, ticketDAO);
         Ticket savedTicket = ticketDAO.getTicket("ABCDEF");
+        setInTime(savedTicket);
+        ticketDAO.updateTicket(savedTicket);
+
+        parkingService.processExitingVehicle();
+        savedTicket = ticketDAO.getTicket("ABCDEF");
+
+
+        assertNotNull(savedTicket.getOutTime(), "out time must be saved into the ticket");
+
+        assertTrue(savedTicket.getPrice() > 0, "the price must be more than 0 because the parking duration is more than 30 minutes");
+
+        int finalNextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
+        assertEquals(finalNextAvailableParkingSpot , nextAvailableParkingSpot, "the parking spot must be available as before the entrance of the vehicle");
+    }
+
+    private static void setInTime(Ticket savedTicket) {
         Date dateMinusOneHour = Date.from(
                 LocalDateTime.now()
                         .minusHours(1)
@@ -84,16 +101,6 @@ public class ParkingDataBaseIT {
                         .toInstant()
         );
         savedTicket.setInTime(dateMinusOneHour);
-        ticketDAO.updateTicket(savedTicket);
-        parkingService.processExitingVehicle();
-        savedTicket = ticketDAO.getTicket("ABCDEF");
-
-
-        assertNotNull(savedTicket.getOutTime(), "out time must be saved into the ticket");
-        assertTrue(savedTicket.getPrice() > 0, "the price must be more than 0 because the parking duration is more than 30 minutes");
-
-        int finalNextAvailableParkingSpot = parkingSpotDAO.getNextAvailableSlot(ParkingType.CAR);
-        assertEquals(finalNextAvailableParkingSpot , nextAvailableParkingSpot, "the parking spot must be available as before the entrance of the vehicle");
     }
 
     @Test
@@ -108,16 +115,8 @@ public class ParkingDataBaseIT {
 
         Ticket secondTicket = ticketDAO.getTicket("ABCDEF");
 
-        Date inTime = Date.from(
-                LocalDateTime.now()
-                        .minusHours(1)
-                        .atZone(ZoneId.systemDefault())
-                        .toInstant()
-        );
-        Date outTime = new Date();
+       setInTime(secondTicket);
 
-        secondTicket.setInTime(inTime);
-        secondTicket.setOutTime(outTime);
         ticketDAO.updateTicket(secondTicket);
 
         parkingService.processExitingVehicle();
@@ -125,11 +124,7 @@ public class ParkingDataBaseIT {
 
         Ticket savedTicket = ticketDAO.getTicket("ABCDEF");
 
-        long durationInMillis = outTime.getTime() - inTime.getTime();
-        double duration = durationInMillis / (1000.0 * 60 * 60);
-        duration = Math.round(duration * 100.0) / 100.0;
-
-        double expectedDiscountedPrice = duration * Fare.CAR_RATE_PER_HOUR * 0.95;
+        double expectedDiscountedPrice = 1.4249999999999998;
         assertEquals(expectedDiscountedPrice, savedTicket.getPrice(), 0.01,"The price must include a 5% discount for recurring user");
     }
 
